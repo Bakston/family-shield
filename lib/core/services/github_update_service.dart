@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class GithubUpdateService {
   static const String owner = 'Bakston';
   static const String repo = 'family-shield';
-  static const String currentVersion = '1.0.2';
-  static const String githubToken = ''; // Оставьте пустым, если репозиторий публичный
+  static const String githubToken = ''; // Оставьте пустым для публичного репозитория
 
   /// Проверка обновлений с GitHub Releases.
   static Future<void> checkForUpdates(BuildContext context, {bool silent = true}) async {
@@ -25,7 +25,7 @@ class GithubUpdateService {
       
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        String latestTag = data['tag_name'] ?? '';
+        String latestTag = data['tag_name'] ?? ''; // Например, "1.0.5" или "v1.0.5"
         
         List assets = data['assets'] ?? [];
         String? downloadUrl;
@@ -37,9 +37,15 @@ class GithubUpdateService {
           }
         }
 
-        String cleanLatest = latestTag.replaceAll(RegExp(r'[^0-9.]'), '');
+        // Получаем текущую версию приложения из pubspec.yaml автоматически
+        final packageInfo = await PackageInfo.fromPlatform();
+        String currentVer = packageInfo.version; // Например, "1.0.4"
 
-        if (cleanLatest.isNotEmpty && cleanLatest != currentVersion && downloadUrl != null) {
+        // Очищаем теги до формата major.minor.patch
+        String cleanLatest = latestTag.replaceAll(RegExp(r'[^0-9.]'), '').split('.').take(3).join('.');
+        String cleanCurrent = currentVer.replaceAll(RegExp(r'[^0-9.]'), '').split('.').take(3).join('.');
+
+        if (cleanLatest.isNotEmpty && cleanLatest != cleanCurrent && downloadUrl != null) {
           if (context.mounted) {
             _showUpdateDialog(context, cleanLatest, downloadUrl);
           }
@@ -80,8 +86,8 @@ class GithubUpdateService {
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context); // Закрываем диалог
-              _downloadAndInstall(context, downloadUrl); // Запускаем скачивание
+              Navigator.pop(context);
+              _downloadAndInstall(context, downloadUrl);
             },
             child: const Text('Обновить'),
           ),
@@ -90,9 +96,7 @@ class GithubUpdateService {
     );
   }
 
-  /// Скачивание APK во временную память и запуск установки
   static Future<void> _downloadAndInstall(BuildContext context, String downloadUrl) async {
-    // Показываем диалог загрузки с прогресс-индикатором
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -116,18 +120,14 @@ class GithubUpdateService {
       final response = await http.get(uri, headers: headers);
 
       if (response.statusCode == 200) {
-        // Получаем временную папку телефона
         final dir = await getTemporaryDirectory();
         final filePath = '${dir.path}/update.apk';
         final file = File(filePath);
         
-        // Записываем байты скачанного файла
         await file.writeAsBytes(response.bodyBytes);
 
-        // Закрываем диалог загрузки
         if (context.mounted) Navigator.pop(context);
 
-        // Открываем файл через системный установщик
         final result = await OpenFilex.open(filePath);
         
         if (result.type != ResultType.done && context.mounted) {
@@ -137,7 +137,7 @@ class GithubUpdateService {
         }
       } else {
         if (context.mounted) {
-          Navigator.pop(context); // Закрываем диалог
+          Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Ошибка при скачивании файла обновления')),
           );
@@ -145,7 +145,7 @@ class GithubUpdateService {
       }
     } catch (e) {
       if (context.mounted) {
-        Navigator.pop(context); // Закрываем диалог
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка: $e')),
         );
