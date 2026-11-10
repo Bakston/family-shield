@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Family Shield</string>
+    <!-- Добавьте эту строку для службы доступности -->
+    <string name="accessibility_service_description">Family Shield использует службу доступности для защиты приложения и родительского контроля.</string>
+</resources>
