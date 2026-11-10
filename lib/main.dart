@@ -1,24 +1,54 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 
-import 'parent/screens/phone_auth_screen.dart';
 import 'parent/screens/parent_panel_screen.dart';
+import 'child/screens/role_selection_screen.dart';
+import 'core/services/github_update_service.dart';
+
+// Глобальный ключ для доступа к контексту приложения
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Фиксируем портретную ориентацию приложения
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+
   await Firebase.initializeApp();
   runApp(const FamilyShieldApp());
 }
 
-class FamilyShieldApp extends StatelessWidget {
+class FamilyShieldApp extends StatefulWidget {
   const FamilyShieldApp({super.key});
+
+  @override
+  State<FamilyShieldApp> createState() => _FamilyShieldAppState();
+}
+
+class _FamilyShieldAppState extends State<FamilyShieldApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Глобальная тихая проверка обновлений при старте приложения
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = navigatorKey.currentContext;
+      if (context != null) {
+        GithubUpdateService.checkForUpdates(context, silent: true);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Family Shield',
+      navigatorKey: navigatorKey, // Передаем ключ в MaterialApp
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
@@ -66,7 +96,7 @@ class AuthWrapper extends StatelessWidget {
   }
 }
 
-/// 1. Стартовый экран с кнопкой "МОЯ СЕМЬЯ"
+/// Стартовый экран с кнопкой "МОЯ СЕМЬЯ"
 class WelcomeStartScreen extends StatelessWidget {
   const WelcomeStartScreen({super.key});
 
@@ -100,101 +130,6 @@ class WelcomeStartScreen extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// 2. Экран выбора роли (Родитель / Ребенок)
-class RoleSelectionScreen extends StatelessWidget {
-  const RoleSelectionScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Выберите роль')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(60)),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const PhoneAuthScreen()),
-                );
-              },
-              child: const Text('РОДИТЕЛЬ', style: TextStyle(fontSize: 18)),
-            ),
-            const SizedBox(height: 20),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(60)),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const ChildJoinScreen()),
-                );
-              },
-              child: const Text('РЕБЁНОК', style: TextStyle(fontSize: 18)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 3. Экран вступления в семью для Ребенка
-class ChildJoinScreen extends StatelessWidget {
-  const ChildJoinScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Вход для ребенка')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text(
-                'Для подключения к семье отсканируйте QR-код с телефона родителя',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16),
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(60)),
-                icon: const Icon(Icons.camera_alt),
-                label: const Text('ВСТУПИТЬ В СЕМЬЮ (Скан QR)'),
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (context) => const ChildPanelScreen()),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 4. Пустая Панель Ребенка
-class ChildPanelScreen extends StatelessWidget {
-  const ChildPanelScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Панель Ребёнка')),
-      body: const Center(
-        child: Text('Устройство успешно привязано!\nПанель ребенка пуста.', textAlign: TextAlign.center),
       ),
     );
   }
