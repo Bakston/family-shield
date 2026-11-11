@@ -1,8 +1,8 @@
 name: family_shield
-description: "A new Flutter project for parental control."
+description: "Мобильное приложение Family Shield для защиты и связи членов семьи."
 publish_to: 'none'
 
-version: 1.0.14+15
+version: 1.0.2+3
 
 environment:
   sdk: ^3.7.2
