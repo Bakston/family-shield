@@ -4,7 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'child_qr_scanner_screen.dart';
-import 'child_panel_screen.dart';
+import 'child_permissions_screen.dart'; // Укажите правильный путь к вашему файлу с правами
 
 class ChildJoinScreen extends StatefulWidget {
   const ChildJoinScreen({super.key});
@@ -67,16 +67,16 @@ class _ChildJoinScreenState extends State<ChildJoinScreen> {
       await prefs.setString('saved_child_id', trimmedId);
       await prefs.setString('saved_child_name', childName);
 
-      // Запрашиваем необходимые системные разрешения
+      // Запрашиваем необходимые системные разрешения на уровне Android
       await _requestPermissions();
 
       if (!mounted) return;
 
-      // Успешно привязано! Очищаем весь стек навигации и открываем панель ребенка
+      // Перенаправляем на экран настройки прав вместо прямого открытия панели
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
-          builder: (context) => ChildPanelScreen(childName: childName),
+          builder: (context) => ChildPermissionsScreen(childName: childName),
         ),
         (route) => false,
       );

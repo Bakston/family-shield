@@ -7,6 +7,7 @@ import '../../main.dart';
 import 'generate_parent_qr_screen.dart';
 import 'scan_second_parent_screen.dart';
 import 'add_child_screen.dart';
+import 'child_detail_screen.dart';
 import '../../core/services/github_update_service.dart';
 import '../../features/widgets/app_version_widget.dart';
 
@@ -36,10 +37,10 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
   }
 
   /// Метод для проверки и запроса доступа к камере перед открытием сканера
-  Future<void> _handleScanButtonTap(BuildContext context) async {
+  Future<void> _handleScanButtonTap() async {
     PermissionStatus cameraStatus = await Permission.camera.request();
 
-    if (!context.mounted) return;
+    if (!mounted) return;
 
     if (cameraStatus.isGranted) {
       Navigator.push(
@@ -47,7 +48,7 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
         MaterialPageRoute(builder: (context) => const ScanSecondParentScreen()),
       );
     } else if (cameraStatus.isPermanentlyDenied) {
-      _showSettingsDialog(context);
+      _showSettingsDialog();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -58,22 +59,22 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
   }
 
   /// Диалог перехода в системные настройки при блокировке разрешений
-  void _showSettingsDialog(BuildContext context) {
+  void _showSettingsDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Требуется доступ к камере'),
         content: const Text(
           'Доступ к камере заблокирован в настройках устройства. Пожалуйста, разрешите доступ в настройках приложения для сканирования QR-кода.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Отмена'),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               openAppSettings();
             },
             child: const Text('Открыть настройки'),
@@ -104,7 +105,7 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                   await prefs.remove('parent_profile_ready_$currentUid');
                 }
                 await FirebaseAuth.instance.signOut();
-                if (!context.mounted) return;
+                if (!mounted) return;
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (context) => const InitialSessionWrapper()),
@@ -245,6 +246,7 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                                   );
 
                                   childrenMap.forEach((key, value) {
+                                    final String childId = key.toString();
                                     final childData = Map<dynamic, dynamic>.from(value);
                                     final childParentUid = childData['parentUid'];
 
@@ -253,8 +255,8 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
 
                                     if (isFamilyChild) {
                                       hasChildren = true;
-                                      final childName = childData['name'] ?? 'Ребёнок';
-                                      final familyRole = childData['familyRole'] ?? 'Ребёнок';
+                                      final childName = childData['name']?.toString() ?? 'Ребёнок';
+                                      final familyRole = childData['familyRole']?.toString() ?? 'Ребёнок';
                                       final isLinked = childData['isLinked'] == true;
 
                                       familyMembers.add(
@@ -268,13 +270,22 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                                             '$familyRole $childName',
                                             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                                           ),
-                                          subtitle: Text(
-                                            isLinked ? 'Устройство привязано' : 'Ожидание сканирования...',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: isLinked ? Colors.green : Colors.orange[800],
-                                            ),
+                                          // Подзаголовок убран полностью
+                                          trailing: const Icon(
+                                            Icons.chevron_right,
+                                            color: Colors.grey,
                                           ),
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) => ChildDetailScreen(
+                                                  childId: childId,
+                                                  childName: childName,
+                                                ),
+                                              ),
+                                            );
+                                          },
                                         ),
                                       );
                                     }
@@ -347,7 +358,7 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                           style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
                           icon: const Icon(Icons.qr_code_scanner),
                           label: const Text('ВСТУПИТЬ В СЕМЬЮ'),
-                          onPressed: () => _handleScanButtonTap(context),
+                          onPressed: _handleScanButtonTap,
                         ),
                       ],
                     ],

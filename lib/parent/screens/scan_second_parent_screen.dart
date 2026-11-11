@@ -57,6 +57,7 @@ class _ScanSecondParentScreenState extends State<ScanSecondParentScreen> {
           (route) => false,
         );
       } catch (e) {
+        if (!mounted) return;
         setState(() => _isHandled = false);
         try {
           _controller.start();
@@ -72,7 +73,7 @@ class _ScanSecondParentScreenState extends State<ScanSecondParentScreen> {
     _codeController.clear();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Ввод кода родителя'),
         content: TextField(
           controller: _codeController,
@@ -84,12 +85,12 @@ class _ScanSecondParentScreenState extends State<ScanSecondParentScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Отмена'),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               _processParentUid(_codeController.text);
             },
             child: const Text('Подтвердить'),
