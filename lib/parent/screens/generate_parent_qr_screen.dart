@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -11,20 +12,20 @@ class GenerateParentQrScreen extends StatelessWidget {
     final uid = currentUser?.uid ?? '';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('QR-код для второго родителя')),
+      appBar: AppBar(title: const Text('Код для второго родителя')),
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Text(
-                'Покажите этот QR-код второму родителю, чтобы он отсканировал его со своего устройства',
+                'Покажите этот QR-код второму родителю или передайте текстовый код для ручного ввода',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16),
               ),
               const SizedBox(height: 32),
-              if (uid.isNotEmpty)
+              if (uid.isNotEmpty) ...[
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -41,10 +42,49 @@ class GenerateParentQrScreen extends StatelessWidget {
                   child: QrImageView(
                     data: uid,
                     version: QrVersions.auto,
-                    size: 240.0,
+                    size: 220.0,
                   ),
-                )
-              else
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Ваш текстовый UID:',
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                            const SizedBox(height: 4),
+                            SelectableText(
+                              uid,
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy, color: Colors.blue),
+                        tooltip: 'Скопировать UID',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: uid));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('UID скопирован в буфер обмена')),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ] else
                 const CircularProgressIndicator(),
             ],
           ),

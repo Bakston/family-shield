@@ -97,37 +97,74 @@ class GithubUpdateService {
   }
 
   static Future<void> _downloadAndInstall(BuildContext context, String downloadUrl) async {
+    int progress = 0;
+    StateSetter? setStateDialog;
+
+    // Показываем диалог с динамическим обновлением прогресса
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 20),
-            Text('Загрузка обновления...'),
-          ],
-        ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          setStateDialog = setState;
+          return AlertDialog(
+            title: const Text('Загрузка обновления'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(value: progress > 0 ? progress / 100 : null),
+                const SizedBox(height: 20),
+                Text(
+                  progress > 0 ? 'Загружено: $progress%' : 'Подключение...',
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
 
     try {
       final uri = Uri.parse(downloadUrl);
-      final headers = <String, String>{
-        if (githubToken.isNotEmpty) 'Authorization': 'Bearer $githubToken',
-      };
+      final client = http.Client();
+      final request = http.Request('GET', uri);
+      if (githubToken.isNotEmpty) {
+        request.headers['Authorization'] = 'Bearer $githubToken';
+      }
 
-      final response = await http.get(uri, headers: headers);
+      final streamedResponse = await client.send(request);
 
-      if (response.statusCode == 200) {
+      if (streamedResponse.statusCode == 200) {
+        final contentLength = streamedResponse.contentLength ?? 0;
+        int receivedBytes = 0;
+
         final dir = await getTemporaryDirectory();
         final filePath = '${dir.path}/update.apk';
         final file = File(filePath);
-        
-        await file.writeAsBytes(response.bodyBytes);
+        final sink = file.openWrite();
 
-        if (context.mounted) Navigator.pop(context);
+        await for (var chunk in streamedResponse.stream) {
+          receivedBytes += chunk.length;
+          sink.add(chunk);
 
+          if (contentLength > 0) {
+            final newProgress = ((receivedBytes / contentLength) * 100).toInt();
+            if (newProgress != progress) {
+              progress = newProgress;
+              // Обновляем состояние внутри диалога без закрытия
+              setStateDialog?.call(() {});
+            }
+          }
+        }
+
+        await sink.flush();
+        await sink.close();
+        client.close();
+
+        if (context.mounted) Navigator.pop(context); // Закрываем диалог загрузки
+
+        // Запускаем установку скачанного APK
         final result = await OpenFilex.open(filePath);
         
         if (result.type != ResultType.done && context.mounted) {
@@ -136,6 +173,7 @@ class GithubUpdateService {
           );
         }
       } else {
+        client.close();
         if (context.mounted) {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(

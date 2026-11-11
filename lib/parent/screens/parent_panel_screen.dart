@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../main.dart';
 import 'generate_parent_qr_screen.dart';
 import 'scan_second_parent_screen.dart';
-import 'add_child_screen.dart'; // Импортируем экран добавления ребенка
+import 'add_child_screen.dart';
 import '../../core/services/github_update_service.dart';
+import '../../features/widgets/app_version_widget.dart';
 
 class ParentPanelScreen extends StatefulWidget {
   const ParentPanelScreen({super.key});
@@ -17,6 +19,21 @@ class ParentPanelScreen extends StatefulWidget {
 
 class _ParentPanelScreenState extends State<ParentPanelScreen> {
   final User? currentUser = FirebaseAuth.instance.currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _markParentSessionReady();
+  }
+
+  /// Фиксируем в SharedPreferences, что профиль родителя полностью настроен
+  Future<void> _markParentSessionReady() async {
+    final uid = currentUser?.uid;
+    if (uid != null && uid.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('parent_profile_ready_$uid', true);
+    }
+  }
 
   /// Метод для проверки и запроса доступа к камере перед открытием сканера
   Future<void> _handleScanButtonTap(BuildContext context) async {
@@ -82,11 +99,15 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
               if (value == 'update') {
                 GithubUpdateService.checkForUpdates(context, silent: false);
               } else if (value == 'logout') {
+                final prefs = await SharedPreferences.getInstance();
+                if (currentUid.isNotEmpty) {
+                  await prefs.remove('parent_profile_ready_$currentUid');
+                }
                 await FirebaseAuth.instance.signOut();
                 if (!context.mounted) return;
                 Navigator.pushAndRemoveUntil(
                   context,
-                  MaterialPageRoute(builder: (context) => const AuthWrapper()),
+                  MaterialPageRoute(builder: (context) => const InitialSessionWrapper()),
                   (route) => false,
                 );
               }
@@ -110,6 +131,13 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                     SizedBox(width: 12),
                     Text('Выйти', style: TextStyle(color: Colors.red)),
                   ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(
+                enabled: false,
+                child: Center(
+                  child: AppVersionWidget(),
                 ),
               ),
             ],
@@ -220,9 +248,8 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                                     final childData = Map<dynamic, dynamic>.from(value);
                                     final childParentUid = childData['parentUid'];
 
-                                    // Проверяем, принадлежит ли ребенок текущему родителю или его партнёру
                                     bool isFamilyChild = (childParentUid == currentUid) || 
-                                                         (linkedParentUid != null && childParentUid == linkedParentUid);
+                                                        (linkedParentUid != null && childParentUid == linkedParentUid);
 
                                     if (isFamilyChild) {
                                       hasChildren = true;
@@ -254,7 +281,6 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                                   });
                                 }
 
-                                // Если ни второго родителя, ни детей в семье нет
                                 if (linkedParentUid == null && !hasChildren) {
                                   familyMembers.add(
                                     const Padding(
@@ -294,7 +320,6 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                   return Column(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // Кнопка добавления ребенка открывает анкету
                       ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
                         icon: const Icon(Icons.child_care),
@@ -306,8 +331,6 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
                           );
                         },
                       ),
-                      
-                      // Кнопки добавления родителя показываются только если второй родитель еще НЕ привязан
                       if (!isParentLinked) ...[
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),

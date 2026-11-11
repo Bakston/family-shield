@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -23,17 +24,17 @@ class _ChildQrDisplayScreenState extends State<ChildQrDisplayScreen> {
       appBar: AppBar(
         title: Text('Привязка: ${widget.childName}'),
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text(
-                'Отсканируйте этот QR-код с помощью телефона ребёнка на экране вступления в семью',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.black87),
-              ),
-            const SizedBox(height: 32),
+              'Отсканируйте этот QR-код с помощью телефона ребёнка или передайте ему текстовый код для ручного ввода',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Colors.black87),
+            ),
+            const SizedBox(height: 24),
             
             // Карточка с QR-кодом
             Center(
@@ -47,10 +48,51 @@ class _ChildQrDisplayScreenState extends State<ChildQrDisplayScreen> {
                   child: QrImageView(
                     data: widget.childId, // Зашиваем уникальный ID ребенка
                     version: QrVersions.auto,
-                    size: 240.0,
+                    size: 220.0,
                     gapless: false,
                   ),
                 ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Блок с текстовым кодом и кнопкой копирования
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Текстовый код привязки:',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        const SizedBox(height: 4),
+                        SelectableText(
+                          widget.childId,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy, color: Colors.blue),
+                    tooltip: 'Скопировать код',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: widget.childId));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Код скопирован в буфер обмена')),
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 24),
@@ -60,7 +102,7 @@ class _ChildQrDisplayScreenState extends State<ChildQrDisplayScreen> {
               stream: FirebaseDatabase.instance.ref('children/${widget.childId}/isLinked').onValue,
               builder: (context, snapshot) {
                 if (snapshot.hasData && snapshot.data!.snapshot.value == true) {
-                  // Как только ребенок сканирует код, статус изменится на true
+                  // Как только ребенок сканирует или вводит код, статус изменится на true
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (mounted) {
                       _showSuccessDialog();
@@ -78,14 +120,14 @@ class _ChildQrDisplayScreenState extends State<ChildQrDisplayScreen> {
                     ),
                     SizedBox(width: 12),
                     Text(
-                      'Ожидание сканирования...',
+                      'Ожидание привязки устройства...',
                       style: TextStyle(color: Colors.grey, fontSize: 15),
                     ),
                   ],
                 );
               },
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
 
             // Кнопка возврата назад
             OutlinedButton(
@@ -112,7 +154,6 @@ class _ChildQrDisplayScreenState extends State<ChildQrDisplayScreen> {
         actions: [
           ElevatedButton(
             onPressed: () {
-              // Закрываем диалог и возвращаемся на Панель Родителя
               Navigator.pop(context); // закрыть диалог
               Navigator.pop(context); // закрыть экран QR
             },

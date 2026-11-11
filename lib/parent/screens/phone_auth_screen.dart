@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'parent_registration_screen.dart';
 import 'parent_panel_screen.dart';
 
@@ -19,12 +20,24 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   bool _codeSent = false;
   bool _isLoading = false;
 
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _codeController.dispose();
+    super.dispose();
+  }
+
   Future<void> _checkProfileAndNavigate(User user) async {
     final snapshot = await FirebaseDatabase.instance.ref('users/${user.uid}').get();
     
     if (!mounted) return;
 
     if (snapshot.exists) {
+      // Кэшируем готовность профиля родителя для мгновенного входа при перезапуске
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('parent_profile_ready_${user.uid}', true);
+
+      if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const ParentPanelScreen()),
@@ -53,12 +66,14 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         }
       },
       verificationFailed: (FirebaseAuthException e) {
+        if (!mounted) return;
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка верификации: ${e.message}')),
         );
       },
       codeSent: (String verificationId, int? resendToken) {
+        if (!mounted) return;
         setState(() {
           _verificationId = verificationId;
           _codeSent = true;
@@ -89,6 +104,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         await _checkProfileAndNavigate(userCredential.user!);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Неверный код: $e')),
