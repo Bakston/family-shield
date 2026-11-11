@@ -2,7 +2,7 @@ name: family_shield
 description: "Мобильное приложение Family Shield для защиты и связи членов семьи."
 publish_to: 'none'
 
-version: 1.0.9+10
+version: 1.0.10+11
 
 environment:
   sdk: ^3.7.2
