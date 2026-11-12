@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'child_qr_display_screen.dart'; // Экран с QR-кодом, создадим его следующим
+import 'package:shared_preferences/shared_preferences.dart';
+import 'child_qr_display_screen.dart';
+
+// Глобальные дизайн-константы
+const Color parentGlassPanel = Color(0x33FFFFFF);
+const Color parentTextPrimary = Colors.white;
 
 class AddChildScreen extends StatefulWidget {
   const AddChildScreen({super.key});
@@ -13,8 +17,7 @@ class AddChildScreen extends StatefulWidget {
 class _AddChildScreenState extends State<AddChildScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _phoneController = TextEditingController();
-  
+
   String _selectedRole = 'Сын'; // По умолчанию
   DateTime? _birthDate;
   bool _isLoading = false;
@@ -22,7 +25,6 @@ class _AddChildScreenState extends State<AddChildScreen> {
   @override
   void dispose() {
     _nameController.dispose();
-    _phoneController.dispose();
     super.dispose();
   }
 
@@ -30,7 +32,9 @@ class _AddChildScreenState extends State<AddChildScreen> {
   Future<void> _selectBirthDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now().subtract(const Duration(days: 365 * 10)), // По умолчанию 10 лет назад
+      initialDate: DateTime.now().subtract(
+        const Duration(days: 365 * 10),
+      ), // 10 лет назад
       firstDate: DateTime(2000),
       lastDate: DateTime.now(),
     );
@@ -46,7 +50,9 @@ class _AddChildScreenState extends State<AddChildScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_birthDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Пожалуйста, выберите дату рождения ребёнка')),
+        const SnackBar(
+          content: Text('Пожалуйста, выберите дату рождения ребёнка'),
+        ),
       );
       return;
     }
@@ -54,8 +60,13 @@ class _AddChildScreenState extends State<AddChildScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final parentUid = FirebaseAuth.instance.currentUser!.uid;
-      
+      final prefs = await SharedPreferences.getInstance();
+      final parentUid = prefs.getString('user_uid');
+
+      if (parentUid == null || parentUid.isEmpty) {
+        throw Exception('Не найден UID родителя в локальной сессии');
+      }
+
       // Создаем уникальный узел для ребенка в базе данных
       final childrenRef = FirebaseDatabase.instance.ref('children').push();
       final childId = childrenRef.key!;
@@ -66,7 +77,6 @@ class _AddChildScreenState extends State<AddChildScreen> {
         'name': _nameController.text.trim(),
         'familyRole': _selectedRole, // Сын или Дочь
         'birthDate': _birthDate!.toIso8601String(),
-        'phone': _phoneController.text.trim(),
         'isLinked': false, // Станет true после того, как ребенок отсканирует QR
         'createdAt': ServerValue.timestamp,
       };
@@ -76,20 +86,21 @@ class _AddChildScreenState extends State<AddChildScreen> {
 
       if (!mounted) return;
 
-      // Переходим на экран отображения QR-кода, передавая туда ID ребенка
+      // Переходим на экран отображения QR-кода
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => ChildQrDisplayScreen(
-            childId: childId,
-            childName: _nameController.text.trim(),
-          ),
+          builder:
+              (context) => ChildQrDisplayScreen(
+                childId: childId,
+                childName: _nameController.text.trim(),
+              ),
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка при сохранении: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка при сохранении: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -97,110 +108,165 @@ class _AddChildScreenState extends State<AddChildScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Добавление ребёнка')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              const Text(
-                'Заполните данные ребёнка для привязки устройства',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-              const SizedBox(height: 24),
-              
-              // Имя ребёнка
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Имя ребёнка',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.person),
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Введите имя ребёнка';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 20),
-
-              // Выбор роли (Сын / Дочь)
-              DropdownButtonFormField<String>(
-                initialValue: _selectedRole,
-                decoration: const InputDecoration(
-                  labelText: 'Роль в семье',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.family_restroom),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'Сын', child: Text('Сын')),
-                  DropdownMenuItem(value: 'Дочь', child: Text('Дочь')),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => _selectedRole = value);
-                  }
-                },
-              ),
-              const SizedBox(height: 20),
-
-              // Выбор даты рождения
-              InkWell(
-                onTap: () => _selectBirthDate(context),
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'Дата рождения',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.calendar_today),
-                  ),
-                  child: Text(
-                    _birthDate == null
-                        ? 'Выберите дату'
-                        : '${_birthDate!.day}.${_birthDate!.month}.${_birthDate!.year}',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: _birthDate == null ? Colors.grey : Colors.black,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // Номер телефона (опционально)
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Номер телефона (необязательно)',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.phone),
-                ),
-              ),
-              const SizedBox(height: 40),
-
-              // Кнопка продолжения (Генерация QR)
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(55),
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: _isLoading ? null : _submitChildForm,
-                child: _isLoading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text(
-                        'ПРИВЯЗАТЬ УСТРОЙСТВО',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-              ),
-            ],
+    return Stack(
+      children: [
+        // 1. Фирменный фоновый рисунок
+        Positioned.fill(
+          child: Image.asset(
+            'assets/images/background_0002_001.jpg',
+            fit: BoxFit.cover,
           ),
         ),
-      ),
+        // 2. Затемняющая вуаль
+        Positioned.fill(
+          child: Container(color: Colors.black.withValues(alpha: 0.45)),
+        ),
+        // 3. Основной контент экрана
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            iconTheme: const IconThemeData(color: parentTextPrimary),
+            title: const Text(
+              'Добавление ребёнка',
+              style: TextStyle(
+                color: parentTextPrimary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          body: Padding(
+            padding: const EdgeInsets.all(5.0),
+            child: Card(
+              elevation: 8,
+              color: Colors.white.withValues(alpha: 0.92),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Form(
+                  key: _formKey,
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      const Text(
+                        'Заполните данные ребёнка для привязки устройства',
+                        style: TextStyle(fontSize: 15, color: Colors.black54),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Имя ребёнка
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: InputDecoration(
+                          labelText: 'Имя ребёнка',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          prefixIcon: const Icon(Icons.person),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Введите имя ребёнка';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Выбор роли (Сын / Дочь)
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedRole,
+                        decoration: InputDecoration(
+                          labelText: 'Роль в семье',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          prefixIcon: const Icon(Icons.family_restroom),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Сын', child: Text('Сын')),
+                          DropdownMenuItem(value: 'Дочь', child: Text('Дочь')),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _selectedRole = value);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Выбор даты рождения
+                      InkWell(
+                        onTap: () => _selectBirthDate(context),
+                        borderRadius: BorderRadius.circular(30),
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: 'Дата рождения',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            prefixIcon: const Icon(Icons.calendar_today),
+                          ),
+                          child: Text(
+                            _birthDate == null
+                                ? 'Календарь'
+                                : '${_birthDate!.day}.${_birthDate!.month}.${_birthDate!.year}',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color:
+                                  _birthDate == null
+                                      ? Colors.grey.shade600
+                                      : Colors.black87,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Кнопка продолжения (Генерация QR) с капсульным скруглением
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(60),
+                          backgroundColor: parentGlassPanel,
+                          foregroundColor: parentTextPrimary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                            side: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.3),
+                              width: 1.5,
+                            ),
+                          ),
+                        ),
+                        onPressed: _isLoading ? null : _submitChildForm,
+                        child:
+                            _isLoading
+                                ? const SizedBox(
+                                  height: 24,
+                                  width: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                                : const Text(
+                                  'ДОБАВИТЬ РЕБЁНКА',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

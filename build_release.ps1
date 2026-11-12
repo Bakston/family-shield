@@ -49,12 +49,20 @@ if (-not (Test-Path $apkPath)) {
     exit 1
 }
 
-Write-Host "[4/5] Committing and pushing version bump to Git..." -ForegroundColor Cyan
+Write-Host "[4/5] Committing, updating tags, and pushing to Git..." -ForegroundColor Cyan
 git add pubspec.yaml
 git commit -m "chore: release $tagName+$buildCode"
 git push
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[WARNING] Git push failed or no upstream branch set. Continuing to release creation..." -ForegroundColor Yellow
+    Write-Host "[WARNING] Git push failed or no upstream branch set." -ForegroundColor Yellow
+}
+
+# Удаляем локальный тег (если существовал), создаем заново и отправляем на origin
+git tag -d $tagName 2>$null
+git tag $tagName
+git push origin $tagName --force
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[WARNING] Failed to push git tag to origin." -ForegroundColor Yellow
 }
 
 Write-Host "[5/5] Creating GitHub Release $tagName and uploading APK..." -ForegroundColor Cyan

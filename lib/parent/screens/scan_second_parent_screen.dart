@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import '../../core/services/database_service.dart';
-import 'parent_panel_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ScanSecondParentScreen extends StatefulWidget {
   const ScanSecondParentScreen({super.key});
@@ -12,156 +11,57 @@ class ScanSecondParentScreen extends StatefulWidget {
 }
 
 class _ScanSecondParentScreenState extends State<ScanSecondParentScreen> {
-  final DatabaseService _databaseService = DatabaseService();
-  final TextEditingController _codeController = TextEditingController();
-  
-  final MobileScannerController _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.normal,
-    facing: CameraFacing.back,
-    torchEnabled: false,
-  );
-  
-  bool _isHandled = false;
+  bool _isProcessing = false;
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    _codeController.dispose();
-    super.dispose();
-  }
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    if (_isProcessing) return;
+    final List<Barcode> barcodes = capture.barcodes;
+    if (barcodes.isEmpty) return;
 
-  Future<void> _processParentUid(String primaryParentUid) async {
-    final trimmedUid = primaryParentUid.trim();
-    if (trimmedUid.isEmpty) return;
+    final String? scannedParentUid = barcodes.first.rawValue;
+    if (scannedParentUid == null || scannedParentUid.trim().isEmpty) return;
 
-    setState(() => _isHandled = true);
-    await _controller.stop();
+    setState(() => _isProcessing = true);
 
-    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUserId != null) {
-      try {
-        await _databaseService.linkSecondParent(
-          newParentUid: currentUserId,
-          primaryParentUid: trimmedUid,
-        );
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final myUid = prefs.getString('user_uid');
 
-        if (!mounted) return;
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Вы успешно присоединились к семье!')),
-        );
-
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const ParentPanelScreen()),
-          (route) => false,
-        );
-      } catch (e) {
-        if (!mounted) return;
-        setState(() => _isHandled = false);
-        try {
-          _controller.start();
-        } catch (_) {}
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка привязки: $e')),
-        );
+      if (myUid == null || myUid.isEmpty) {
+        throw Exception('Ваш профиль не найден');
       }
-    }
-  }
 
-  void _showManualEntryDialog() {
-    _codeController.clear();
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Ввод кода родителя'),
-        content: TextField(
-          controller: _codeController,
-          decoration: const InputDecoration(
-            labelText: 'Введите UID первого родителя',
-            hintText: 'Например: abc123xyz...',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Отмена'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              _processParentUid(_codeController.text);
-            },
-            child: const Text('Подтвердить'),
-          ),
-        ],
-      ),
-    );
+      if (myUid == scannedParentUid) {
+        throw Exception('Нельзя привязать свой собственный QR-код');
+      }
+
+      final db = FirebaseDatabase.instance.ref('users');
+      // Двусторонняя привязка родителей друг к другу
+      await db.child('$myUid/linkedParent').set(scannedParentUid);
+      await db.child('$scannedParentUid/linkedParent').set(myUid);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Второй член семьи успешно подключён!')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isProcessing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка привязки: $e')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Привязка второго родителя'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.keyboard),
-            tooltip: 'Ввести код текстом',
-            onPressed: _showManualEntryDialog,
-          ),
-        ],
+        title: const Text('Сканирование QR-кода'),
       ),
-      body: Stack(
-        children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: (BarcodeCapture capture) async {
-              if (_isHandled) return;
-              final List<Barcode> barcodes = capture.barcodes;
-              
-              for (final barcode in barcodes) {
-                final primaryParentUid = barcode.rawValue;
-                if (primaryParentUid != null && primaryParentUid.isNotEmpty) {
-                  await _processParentUid(primaryParentUid);
-                  break;
-                }
-              }
-            },
-            errorBuilder: (context, error, child) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Text(
-                    'Не удалось запустить камеру: ${error.errorCode.name}\n\n'
-                    'Убедитесь, что приложению предоставлен доступ к камере в настройках устройства.',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.red, fontSize: 16),
-                  ),
-                ),
-              );
-            },
-          ),
-          Positioned(
-            bottom: 40,
-            left: 24,
-            right: 24,
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: _showManualEntryDialog,
-              icon: const Icon(Icons.keyboard),
-              label: const Text(
-                'ВВЕСТИ КОД ТЕКСТОМ',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ],
+      body: MobileScanner(
+        onDetect: _onDetect,
       ),
     );
   }

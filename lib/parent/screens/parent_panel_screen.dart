@@ -1,15 +1,21 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../main.dart';
+
+import '../../features/auth/initial_session_wrapper.dart';
 import 'generate_parent_qr_screen.dart';
 import 'scan_second_parent_screen.dart';
 import 'add_child_screen.dart';
 import 'child_detail_screen.dart';
+import 'child_qr_display_screen.dart';
 import '../../core/services/github_update_service.dart';
 import '../../features/widgets/app_version_widget.dart';
+
+// Глобальные дизайн-константы в стиле стекломорфизма
+const Color parentGlassPanel = Color(0x33FFFFFF);
+const Color parentTextPrimary = Colors.white;
 
 class ParentPanelScreen extends StatefulWidget {
   const ParentPanelScreen({super.key});
@@ -19,24 +25,90 @@ class ParentPanelScreen extends StatefulWidget {
 }
 
 class _ParentPanelScreenState extends State<ParentPanelScreen> {
-  final User? currentUser = FirebaseAuth.instance.currentUser;
+  String _currentUid = '';
+  String _localName = 'Вы';
+  String _localRole = 'Родитель';
+  String _localBirthDate = '';
+
+  late Timer _clockTimer;
+  DateTime _now = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _markParentSessionReady();
+    _loadLocalProfile();
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {
+          _now = DateTime.now();
+        });
+      }
+    });
   }
 
-  /// Фиксируем в SharedPreferences, что профиль родителя полностью настроен
-  Future<void> _markParentSessionReady() async {
-    final uid = currentUser?.uid;
-    if (uid != null && uid.isNotEmpty) {
-      final prefs = await SharedPreferences.getInstance();
+  @override
+  void dispose() {
+    _clockTimer.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadLocalProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    final uid = prefs.getString('user_uid') ?? '';
+    final name = prefs.getString('user_name') ?? 'Вы';
+    final role = prefs.getString('user_role') ?? 'Родитель';
+    final birthDate = prefs.getString('user_birth_date') ?? '';
+
+    if (uid.isNotEmpty) {
       await prefs.setBool('parent_profile_ready_$uid', true);
     }
+
+    if (!mounted) return;
+    setState(() {
+      _currentUid = uid;
+      _localName = name;
+      _localRole = role;
+      _localBirthDate = birthDate;
+    });
   }
 
-  /// Метод для проверки и запроса доступа к камере перед открытием сканера
+  String _formatTime(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    final s = dt.second.toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  String _formatRussianDate(DateTime dt) {
+    const weekdays = [
+      'Понедельник',
+      'Вторник',
+      'Среда',
+      'Четверг',
+      'Пятница',
+      'Суббота',
+      'Воскресенье',
+    ];
+    const months = [
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    final weekday = weekdays[dt.weekday - 1];
+    final month = months[dt.month - 1];
+    return '$weekday, ${dt.day} $month ${dt.year}';
+  }
+
+  /// Запрос камеры перед открытием сканера второго родителя
   Future<void> _handleScanButtonTap() async {
     PermissionStatus cameraStatus = await Permission.camera.request();
 
@@ -58,317 +130,1001 @@ class _ParentPanelScreenState extends State<ParentPanelScreen> {
     }
   }
 
-  /// Диалог перехода в системные настройки при блокировке разрешений
   void _showSettingsDialog() {
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Требуется доступ к камере'),
-        content: const Text(
-          'Доступ к камере заблокирован в настройках устройства. Пожалуйста, разрешите доступ в настройках приложения для сканирования QR-кода.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Отмена'),
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('Требуется доступ к камере'),
+            content: const Text(
+              'Доступ к камере заблокирован в настройках устройства. Пожалуйста, разрешите доступ в настройках приложения для сканирования QR-кода.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Отмена'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  openAppSettings();
+                },
+                child: const Text('Открыть настройки'),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              openAppSettings();
-            },
-            child: const Text('Открыть настройки'),
-          ),
-        ],
+    );
+  }
+
+  /// Модальное окно выбора способа добавления второго члена семьи
+  void _showAddSecondMemberSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder:
+          (sheetContext) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Добавить второго члена семьи',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(60),
+                      backgroundColor: parentGlassPanel,
+                      foregroundColor: parentTextPrimary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.qr_code),
+                    label: const Text('ДЛЯ ПОДКЛЮЧЕНИЯ'),
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const GenerateParentQrScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(60),
+                      backgroundColor: parentGlassPanel,
+                      foregroundColor: parentTextPrimary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                        side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('ДЛЯ ВСТУПЛЕНИЯ'),
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      _handleScanButtonTap();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
+  }
+
+  /// Отображение карточки взрослого члена семьи при клике
+  void _showMemberInfoDialog({
+    required String name,
+    required String role,
+    required String birthDate,
+    required bool isMe,
+  }) {
+    showDialog(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                Icon(Icons.person, color: isMe ? Colors.blue : Colors.green),
+                const SizedBox(width: 8),
+                Expanded(child: Text('$role $name')),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Статус: ${isMe ? "Ваш профиль" : "Второй родитель"}'),
+                const SizedBox(height: 8),
+                Text(
+                  'Дата рождения: ${birthDate.isNotEmpty ? birthDate : "Не указана"}',
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Закрыть'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  /// Подтверждение и покидание семьи (удаление привязки в БД с сохранением сессии)
+  void _confirmLeaveFamily() {
+    showDialog(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('Покинуть семью?'),
+            content: const Text(
+              'Вы уверены, что хотите разорвать семейные связи на этом устройстве? Ваш профиль останется активным.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Отмена'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange.shade800,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _performLeaveFamily();
+                },
+                child: const Text('Покинуть'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  Future<void> _performLeaveFamily() async {
+    if (_currentUid.isEmpty) return;
+
+    try {
+      final db = FirebaseDatabase.instance.ref();
+      final userSnapshot = await db.child('users/$_currentUid').get();
+      if (userSnapshot.exists && userSnapshot.value != null) {
+        final userData = Map<dynamic, dynamic>.from(userSnapshot.value as Map);
+        final linkedParentUid = userData['linkedParent'];
+
+        if (linkedParentUid != null) {
+          await db.child('users/$linkedParentUid/linkedParent').remove();
+        }
+      }
+
+      await db.child('users/$_currentUid/linkedParent').remove();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Вы успешно покинули семью')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка при выходе из семьи: $e')));
+    }
+  }
+
+  /// Подтверждение и удаление профиля из БД с закрытием сессии
+  void _confirmDeleteProfile() {
+    showDialog(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('Удалить профиль?'),
+            content: const Text(
+              'Это действие полностью удалит ваш профиль и данные из базы данных. Сессия будет закрыта.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Отмена'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _performDeleteProfile();
+                },
+                child: const Text('Удалить'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  Future<void> _performDeleteProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (_currentUid.isNotEmpty) {
+      try {
+        final db = FirebaseDatabase.instance.ref();
+        final userSnapshot = await db.child('users/$_currentUid').get();
+        if (userSnapshot.exists && userSnapshot.value != null) {
+          final userData = Map<dynamic, dynamic>.from(
+            userSnapshot.value as Map,
+          );
+          final linkedParentUid = userData['linkedParent'];
+          if (linkedParentUid != null) {
+            await db.child('users/$linkedParentUid/linkedParent').remove();
+          }
+        }
+
+        await db.child('users/$_currentUid').remove();
+      } catch (e) {
+        debugPrint('Ошибка при удалении профиля из БД: $e');
+      }
+
+      await prefs.remove('parent_profile_ready_$_currentUid');
+    }
+
+    await prefs.remove('user_type');
+    await prefs.remove('user_uid');
+    await prefs.remove('user_name');
+    await prefs.remove('user_role');
+    await prefs.remove('user_birth_date');
+
+    if (!mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const InitialSessionWrapper()),
+      (route) => false,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentUid = currentUser?.uid ?? '';
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Панель Родителя'),
-        actions: [
-          // Меню настроек (шестеренка)
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.settings),
-            tooltip: 'Настройки',
-            onSelected: (value) async {
-              if (value == 'update') {
-                GithubUpdateService.checkForUpdates(context, silent: false);
-              } else if (value == 'logout') {
-                final prefs = await SharedPreferences.getInstance();
-                if (currentUid.isNotEmpty) {
-                  await prefs.remove('parent_profile_ready_$currentUid');
-                }
-                await FirebaseAuth.instance.signOut();
-                if (!mounted) return;
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (context) => const InitialSessionWrapper()),
-                  (route) => false,
-                );
-              }
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Image.asset(
+            'assets/images/background_0002_001.jpg',
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) {
+              debugPrint('ОШИБКА ЗАГРУЗКИ ФОНА: $error');
+              return Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.blueGrey.shade900, Colors.blue.shade900],
+                  ),
+                ),
+              );
             },
-            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-              const PopupMenuItem<String>(
-                value: 'update',
-                child: Row(
-                  children: [
-                    Icon(Icons.system_update, color: Colors.grey),
-                    SizedBox(width: 12),
-                    Text('Проверить обновления'),
-                  ],
-                ),
+          ),
+        ),
+        Positioned.fill(
+          child: Container(color: Colors.black.withValues(alpha: 0.4)),
+        ),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            title: const Text(
+              'Панель Родителя',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
               ),
-              const PopupMenuItem<String>(
-                value: 'logout',
-                child: Row(
-                  children: [
-                    Icon(Icons.logout, color: Colors.red),
-                    SizedBox(width: 12),
-                    Text('Выйти', style: TextStyle(color: Colors.red)),
-                  ],
-                ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem<String>(
-                enabled: false,
-                child: Center(
-                  child: AppVersionWidget(),
-                ),
+            ),
+            iconTheme: const IconThemeData(color: Colors.white),
+            actions: [
+              // Меню настроек с кнопкой проверки обновлений и удаления профиля
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.settings, color: Colors.white),
+                tooltip: 'Настройки',
+                onSelected: (value) {
+                  if (value == 'update') {
+                    GithubUpdateService.checkForUpdates(context, silent: false);
+                  } else if (value == 'delete_profile') {
+                    _confirmDeleteProfile();
+                  }
+                },
+                itemBuilder:
+                    (BuildContext context) => <PopupMenuEntry<String>>[
+                      const PopupMenuItem<String>(
+                        value: 'update',
+                        child: Row(
+                          children: [
+                            Icon(Icons.system_update, color: Colors.blueGrey),
+                            SizedBox(width: 12),
+                            Text('Проверить обновления'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem<String>(
+                        value: 'delete_profile',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_forever, color: Colors.red),
+                            SizedBox(width: 12),
+                            Text(
+                              'Удалить профиль',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem<String>(
+                        enabled: false,
+                        child: Center(child: AppVersionWidget()),
+                      ),
+                    ],
               ),
             ],
           ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // БЛОК ОТОБРАЖЕНИЯ «МОЯ СЕМЬЯ»
-            Expanded(
-              flex: 2,
-              child: Card(
-                elevation: 4,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Моя семья',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 8.0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // БЛОК 1: ПАНЕЛЬ ВРЕМЕНИ И ДАТЫ (В ЕДИНОМ СТИЛЕ СО СКРИНШОТА)
+                  Card(
+                    elevation: 4,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 14.0,
+                        horizontal: 20.0,
                       ),
-                      const Divider(),
-                      Expanded(
-                        child: StreamBuilder<DatabaseEvent>(
-                          stream: FirebaseDatabase.instance.ref('users/$currentUid').onValue,
-                          builder: (context, userSnapshot) {
-                            if (userSnapshot.connectionState == ConnectionState.waiting) {
-                              return const Center(child: CircularProgressIndicator());
-                            }
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _formatTime(_now),
+                                style: const TextStyle(
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _formatRussianDate(_now),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.access_time_filled,
+                              size: 28,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
 
-                            if (!userSnapshot.hasData || userSnapshot.data!.snapshot.value == null) {
-                              return const Center(child: Text('Профиль не найден'));
-                            }
-
-                            final myData = Map<dynamic, dynamic>.from(
-                              userSnapshot.data!.snapshot.value as Map,
-                            );
-                            
-                            final myName = myData['name'] ?? 'Вы';
-                            final myRole = myData['familyRole'] ?? 'Родитель';
-                            final linkedParentUid = myData['linkedParent'];
-
-                            // Слушаем весь узел children для фильтрации по обоим родителям
-                            return StreamBuilder<DatabaseEvent>(
-                              stream: FirebaseDatabase.instance.ref('children').onValue,
-                              builder: (context, childrenSnapshot) {
-                                List<Widget> familyMembers = [];
-
-                                // 1. Строка текущего пользователя
-                                familyMembers.add(
-                                  ListTile(
-                                    dense: true,
-                                    leading: const Icon(Icons.person, color: Colors.blue),
-                                    title: Text(
-                                      '$myRole $myName (Вы)',
-                                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                                    ),
-                                  ),
-                                );
-
-                                // 2. Второй родитель (если есть)
-                                if (linkedParentUid != null) {
-                                  familyMembers.add(
-                                    FutureBuilder<DataSnapshot>(
-                                      future: FirebaseDatabase.instance.ref('users/$linkedParentUid').get(),
-                                      builder: (context, parentSnapshot) {
-                                        if (!parentSnapshot.hasData || parentSnapshot.data!.value == null) {
-                                          return const ListTile(
-                                            dense: true,
-                                            leading: Icon(Icons.person_outline, color: Colors.grey),
-                                            title: Text('Загрузка второго родителя...'),
-                                          );
-                                        }
-
-                                        final partnerData = Map<dynamic, dynamic>.from(
-                                          parentSnapshot.data!.value as Map,
-                                        );
-                                        
-                                        final partnerName = partnerData['name'] ?? 'Второй родитель';
-                                        final partnerRole = partnerData['familyRole'] ?? 'Родитель';
-
-                                        return ListTile(
-                                          dense: true,
-                                          leading: const Icon(Icons.person, color: Colors.green),
-                                          title: Text(
-                                            '$partnerRole $partnerName',
-                                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  );
-                                }
-
-                                // 3. Добавляем детей, принадлежащих любому из родителей в семье
-                                bool hasChildren = false;
-                                if (childrenSnapshot.hasData && childrenSnapshot.data!.snapshot.value != null) {
-                                  final childrenMap = Map<dynamic, dynamic>.from(
-                                    childrenSnapshot.data!.snapshot.value as Map,
-                                  );
-
-                                  childrenMap.forEach((key, value) {
-                                    final String childId = key.toString();
-                                    final childData = Map<dynamic, dynamic>.from(value);
-                                    final childParentUid = childData['parentUid'];
-
-                                    bool isFamilyChild = (childParentUid == currentUid) || 
-                                                        (linkedParentUid != null && childParentUid == linkedParentUid);
-
-                                    if (isFamilyChild) {
-                                      hasChildren = true;
-                                      final childName = childData['name']?.toString() ?? 'Ребёнок';
-                                      final familyRole = childData['familyRole']?.toString() ?? 'Ребёнок';
-                                      final isLinked = childData['isLinked'] == true;
-
-                                      familyMembers.add(
-                                        ListTile(
-                                          dense: true,
-                                          leading: Icon(
-                                            Icons.child_care,
-                                            color: isLinked ? Colors.purple : Colors.orange,
-                                          ),
-                                          title: Text(
-                                            '$familyRole $childName',
-                                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                                          ),
-                                          // Подзаголовок убран полностью
-                                          trailing: const Icon(
-                                            Icons.chevron_right,
-                                            color: Colors.grey,
-                                          ),
-                                          onTap: () {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (context) => ChildDetailScreen(
-                                                  childId: childId,
-                                                  childName: childName,
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      );
-                                    }
-                                  });
-                                }
-
-                                if (linkedParentUid == null && !hasChildren) {
-                                  familyMembers.add(
-                                    const Padding(
-                                      padding: EdgeInsets.only(top: 8.0),
+                  // БЛОК 2: ПАНЕЛЬ СО СТАТИСТИКОЙ
+                  Card(
+                    elevation: 4,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14.0),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.shield_rounded,
+                              size: 36,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Expanded(
                                       child: Text(
-                                        'В семье пока нет других участников.',
-                                        style: TextStyle(color: Colors.grey, fontSize: 13),
-                                        textAlign: TextAlign.center,
+                                        'Уровень защиты семьи',
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black87,
+                                        ),
                                       ),
                                     ),
-                                  );
-                                }
+                                    SizedBox(width: 8),
+                                    Text(
+                                      '85%',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: LinearProgressIndicator(
+                                    value: 0.85,
+                                    minHeight: 8,
+                                    backgroundColor: Colors.grey.shade300,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.green.shade600,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Мониторинг активен • Сводка за сегодня в норме',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
 
-                                return ListView(
-                                  children: familyMembers,
-                                );
-                              },
-                            );
-                          },
+                  // БЛОК 3: ЭКРАН СОСТАВА СЕМЬИ С КЛИКАБЕЛЬНЫМИ ЧЛЕНАМИ СЕМЬИ
+                  Expanded(
+                    child: Card(
+                      elevation: 6,
+                      color: Colors.white.withValues(alpha: 0.92),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Состав семьи',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            const Divider(),
+                            Expanded(
+                              child:
+                                  _currentUid.isEmpty
+                                      ? const Center(
+                                        child: CircularProgressIndicator(),
+                                      )
+                                      : StreamBuilder<DatabaseEvent>(
+                                        stream:
+                                            FirebaseDatabase.instance
+                                                .ref('users/$_currentUid')
+                                                .onValue,
+                                        builder: (context, userSnapshot) {
+                                          Map<dynamic, dynamic> myData = {};
+                                          if (userSnapshot.hasData &&
+                                              userSnapshot
+                                                      .data!
+                                                      .snapshot
+                                                      .value !=
+                                                  null) {
+                                            myData = Map<dynamic, dynamic>.from(
+                                              userSnapshot.data!.snapshot.value
+                                                  as Map,
+                                            );
+                                          }
+
+                                          final myName =
+                                              myData['name']?.toString() ??
+                                              _localName;
+                                          final myRole =
+                                              myData['familyRole']
+                                                  ?.toString() ??
+                                              _localRole;
+                                          final myBirthDate =
+                                              myData['birthDate']?.toString() ??
+                                              _localBirthDate;
+                                          final linkedParentUid =
+                                              myData['linkedParent'];
+
+                                          return StreamBuilder<DatabaseEvent>(
+                                            stream:
+                                                FirebaseDatabase.instance
+                                                    .ref('children')
+                                                    .onValue,
+                                            builder: (
+                                              context,
+                                              childrenSnapshot,
+                                            ) {
+                                              List<Widget> familyMembers = [];
+
+                                              // 1. Кликабельная карточка текущего родителя
+                                              familyMembers.add(
+                                                ListTile(
+                                                  dense: true,
+                                                  leading: const Icon(
+                                                    Icons.person,
+                                                    color: Colors.blue,
+                                                  ),
+                                                  title: Text(
+                                                    '$myRole $myName (Вы)',
+                                                    style: const TextStyle(
+                                                      fontSize: 15,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  subtitle:
+                                                      myBirthDate.isNotEmpty
+                                                          ? Text(
+                                                            'Дата рождения: $myBirthDate',
+                                                          )
+                                                          : null,
+                                                  trailing: const Icon(
+                                                    Icons.info_outline,
+                                                    size: 20,
+                                                    color: Colors.blueGrey,
+                                                  ),
+                                                  onTap:
+                                                      () =>
+                                                          _showMemberInfoDialog(
+                                                            name: myName,
+                                                            role: myRole,
+                                                            birthDate:
+                                                                myBirthDate,
+                                                            isMe: true,
+                                                          ),
+                                                ),
+                                              );
+
+                                              // 2. Кликабельная карточка второго родителя (если привязан)
+                                              if (linkedParentUid != null) {
+                                                familyMembers.add(
+                                                  FutureBuilder<DataSnapshot>(
+                                                    future:
+                                                        FirebaseDatabase
+                                                            .instance
+                                                            .ref(
+                                                              'users/$linkedParentUid',
+                                                            )
+                                                            .get(),
+                                                    builder: (
+                                                      context,
+                                                      parentSnapshot,
+                                                    ) {
+                                                      if (!parentSnapshot
+                                                              .hasData ||
+                                                          parentSnapshot
+                                                                  .data!
+                                                                  .value ==
+                                                              null) {
+                                                        return const ListTile(
+                                                          dense: true,
+                                                          leading: Icon(
+                                                            Icons
+                                                                .person_outline,
+                                                            color: Colors.grey,
+                                                          ),
+                                                          title: Text(
+                                                            'Загрузка второго члена семьи...',
+                                                          ),
+                                                        );
+                                                      }
+
+                                                      final partnerData = Map<
+                                                        dynamic,
+                                                        dynamic
+                                                      >.from(
+                                                        parentSnapshot
+                                                                .data!
+                                                                .value
+                                                            as Map,
+                                                      );
+
+                                                      final partnerName =
+                                                          partnerData['name']
+                                                              ?.toString() ??
+                                                          'Родитель';
+                                                      final partnerRole =
+                                                          partnerData['familyRole']
+                                                              ?.toString() ??
+                                                          'Родитель';
+                                                      final partnerBirth =
+                                                          partnerData['birthDate']
+                                                              ?.toString() ??
+                                                          '';
+
+                                                      return ListTile(
+                                                        dense: true,
+                                                        leading: const Icon(
+                                                          Icons.person,
+                                                          color: Colors.green,
+                                                        ),
+                                                        title: Text(
+                                                          '$partnerRole $partnerName',
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 15,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                              ),
+                                                        ),
+                                                        trailing: const Icon(
+                                                          Icons.chevron_right,
+                                                          color: Colors.grey,
+                                                        ),
+                                                        onTap:
+                                                            () => _showMemberInfoDialog(
+                                                              name: partnerName,
+                                                              role: partnerRole,
+                                                              birthDate:
+                                                                  partnerBirth,
+                                                              isMe: false,
+                                                            ),
+                                                      );
+                                                    },
+                                                  ),
+                                                );
+                                              }
+
+                                              // 3. Кликабельные карточки детей (с индикатором привязки)
+                                              if (childrenSnapshot.hasData &&
+                                                  childrenSnapshot
+                                                          .data!
+                                                          .snapshot
+                                                          .value !=
+                                                      null) {
+                                                final childrenMap =
+                                                    Map<dynamic, dynamic>.from(
+                                                      childrenSnapshot
+                                                              .data!
+                                                              .snapshot
+                                                              .value
+                                                          as Map,
+                                                    );
+
+                                                childrenMap.forEach((
+                                                  key,
+                                                  value,
+                                                ) {
+                                                  final String childId =
+                                                      key.toString();
+                                                  final childData = Map<
+                                                    dynamic,
+                                                    dynamic
+                                                  >.from(value);
+                                                  final childParentUid =
+                                                      childData['parentUid'];
+
+                                                  bool isFamilyChild =
+                                                      (childParentUid ==
+                                                          _currentUid) ||
+                                                      (linkedParentUid !=
+                                                              null &&
+                                                          childParentUid ==
+                                                              linkedParentUid);
+
+                                                  if (isFamilyChild) {
+                                                    final childName =
+                                                        childData['name']
+                                                            ?.toString() ??
+                                                        'Ребёнок';
+                                                    final familyRole =
+                                                        childData['familyRole']
+                                                            ?.toString() ??
+                                                        'Ребёнок';
+                                                    final isLinked =
+                                                        childData['isLinked'] ==
+                                                        true;
+
+                                                    familyMembers.add(
+                                                      ListTile(
+                                                        dense: true,
+                                                        leading: Icon(
+                                                          isLinked
+                                                              ? Icons.child_care
+                                                              : Icons
+                                                                  .hourglass_top,
+                                                          color:
+                                                              isLinked
+                                                                  ? Colors
+                                                                      .purple
+                                                                  : Colors
+                                                                      .orange
+                                                                      .shade800,
+                                                        ),
+                                                        title: Text(
+                                                          '$familyRole $childName',
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 15,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                              ),
+                                                        ),
+                                                        subtitle: Text(
+                                                          isLinked
+                                                              ? 'Устройство привязано'
+                                                              : 'Ожидает привязки...',
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            color:
+                                                                isLinked
+                                                                    ? Colors
+                                                                        .green
+                                                                        .shade700
+                                                                    : Colors
+                                                                        .orange
+                                                                        .shade800,
+                                                            fontWeight:
+                                                                isLinked
+                                                                    ? FontWeight
+                                                                        .normal
+                                                                    : FontWeight
+                                                                        .w500,
+                                                          ),
+                                                        ),
+                                                        trailing: const Icon(
+                                                          Icons.chevron_right,
+                                                          color: Colors.grey,
+                                                        ),
+                                                        onTap: () {
+                                                          if (isLinked) {
+                                                            Navigator.push(
+                                                              context,
+                                                              MaterialPageRoute(
+                                                                builder:
+                                                                    (
+                                                                      context,
+                                                                    ) => ChildDetailScreen(
+                                                                      childId:
+                                                                          childId,
+                                                                      childName:
+                                                                          childName,
+                                                                    ),
+                                                              ),
+                                                            );
+                                                          } else {
+                                                            Navigator.push(
+                                                              context,
+                                                              MaterialPageRoute(
+                                                                builder:
+                                                                    (
+                                                                      context,
+                                                                    ) => ChildQrDisplayScreen(
+                                                                      childId:
+                                                                          childId,
+                                                                      childName:
+                                                                          childName,
+                                                                    ),
+                                                              ),
+                                                            );
+                                                          }
+                                                        },
+                                                      ),
+                                                    );
+                                                  }
+                                                });
+                                              }
+
+                                              return ListView(
+                                                children: familyMembers,
+                                              );
+                                            },
+                                          );
+                                        },
+                                      ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
+                  const SizedBox(height: 12),
 
-            // КНОПКИ УПРАВЛЕНИЯ
-            Expanded(
-              flex: 3,
-              child: StreamBuilder<DatabaseEvent>(
-                stream: FirebaseDatabase.instance.ref('users/$currentUid/linkedParent').onValue,
-                builder: (context, snapshot) {
-                  final bool isParentLinked = snapshot.data?.snapshot.value != null;
+                  // БЛОК 4: ПАНЕЛЬ С КНОПКАМИ УПРАВЛЕНИЯ
+                  StreamBuilder<DatabaseEvent>(
+                    stream:
+                        FirebaseDatabase.instance
+                            .ref('users/$_currentUid')
+                            .onValue,
+                    builder: (context, userSnap) {
+                      bool isInFamily = false;
+                      if (userSnap.hasData &&
+                          userSnap.data!.snapshot.value != null) {
+                        final data = Map<dynamic, dynamic>.from(
+                          userSnap.data!.snapshot.value as Map,
+                        );
+                        if (data['linkedParent'] != null) {
+                          isInFamily = true;
+                        }
+                      }
 
-                  return Column(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                        icon: const Icon(Icons.child_care),
-                        label: const Text('ДОБАВИТЬ РЕБЁНКА'),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const AddChildScreen()),
+                      return StreamBuilder<DatabaseEvent>(
+                        stream:
+                            FirebaseDatabase.instance.ref('children').onValue,
+                        builder: (context, childSnap) {
+                          if (childSnap.hasData &&
+                              childSnap.data!.snapshot.value != null) {
+                            final childrenMap = Map<dynamic, dynamic>.from(
+                              childSnap.data!.snapshot.value as Map,
+                            );
+                            childrenMap.forEach((_, value) {
+                              final childData = Map<dynamic, dynamic>.from(
+                                value,
+                              );
+                              if (childData['parentUid'] == _currentUid) {
+                                isInFamily = true;
+                              }
+                            });
+                          }
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(60),
+                                  backgroundColor: parentGlassPanel,
+                                  foregroundColor: parentTextPrimary,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(30),
+                                    side: BorderSide(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.3,
+                                      ),
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                ),
+                                icon: const Icon(Icons.child_care),
+                                label: const Text(
+                                  'ДОБАВИТЬ РЕБЁНКА',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder:
+                                          (context) => const AddChildScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(60),
+                                  backgroundColor: parentGlassPanel,
+                                  foregroundColor: parentTextPrimary,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(30),
+                                    side: BorderSide(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.3,
+                                      ),
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                ),
+                                icon: const Icon(Icons.person_add),
+                                label: const Text(
+                                  'ВТОРОЙ РОДИТЕЛЬ',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: _showAddSecondMemberSheet,
+                              ),
+                              if (isInFamily) ...[
+                                const SizedBox(height: 8),
+                                ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    minimumSize: const Size.fromHeight(60),
+                                    backgroundColor: parentGlassPanel,
+                                    foregroundColor: parentTextPrimary,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(30),
+                                      side: BorderSide(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.3,
+                                        ),
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                  icon: const Icon(Icons.exit_to_app),
+                                  label: const Text(
+                                    'ПОКИНУТЬ СЕМЬЮ',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  onPressed: _confirmLeaveFamily,
+                                ),
+                              ],
+                            ],
                           );
                         },
-                      ),
-                      if (!isParentLinked) ...[
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                          icon: const Icon(Icons.person_add),
-                          label: const Text('ДОБАВИТЬ РОДИТЕЛЯ'),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (context) => const GenerateParentQrScreen()),
-                            );
-                          },
-                        ),
-                        OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                          icon: const Icon(Icons.qr_code_scanner),
-                          label: const Text('ВСТУПИТЬ В СЕМЬЮ'),
-                          onPressed: _handleScanButtonTap,
-                        ),
-                      ],
-                    ],
-                  );
-                },
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }
