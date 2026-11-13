@@ -2,7 +2,7 @@ name: family_shield
 description: "Мобильное приложение Family Shield для защиты и связи членов семьи."
 publish_to: 'none'
 
-version: 1.0.19+20
+version: 1.0.20+21
 
 environment:
   sdk: ^3.7.2
@@ -27,6 +27,7 @@ dependencies:
   latlong2: 0.10.1
   battery_plus: 7.1.2
   device_apps_ng: ^3.0.2
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
