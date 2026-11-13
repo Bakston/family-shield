@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'child_panel_screen.dart';
+import 'child_permissions_screen.dart';
 
 class ChildQrScannerScreen extends StatefulWidget {
   const ChildQrScannerScreen({super.key});
@@ -15,25 +15,27 @@ class ChildQrScannerScreen extends StatefulWidget {
 class _ChildQrScannerScreenState extends State<ChildQrScannerScreen> {
   bool _isProcessing = false;
   final MobileScannerController _controller = MobileScannerController();
-  final TextEditingController _codeController = TextEditingController();
 
   static const platform = MethodChannel('com.example.family_shield/device_admin');
 
   @override
   void dispose() {
     _controller.dispose();
-    _codeController.dispose();
     super.dispose();
   }
 
   Future<void> _requestPermissions() async {
     try {
-      await platform.invokeMethod('requestDeviceAdmin');
+      await platform.invokeMethod('requestDeviceAdmin').timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {},
+          );
       await Future.delayed(const Duration(milliseconds: 500));
-      await platform.invokeMethod('requestAccessibility');
-    } on PlatformException catch (e) {
-      _showError('Ошибка запроса разрешений: ${e.message}');
-    }
+      await platform.invokeMethod('requestAccessibility').timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {},
+          );
+    } catch (_) {}
   }
 
   Future<void> _processChildId(String childId) async {
@@ -46,39 +48,31 @@ class _ChildQrScannerScreenState extends State<ChildQrScannerScreen> {
       final snapshot = await childRef.get();
 
       if (!snapshot.exists || snapshot.value == null) {
-        _showError('Код недействителен или ребёнок не найден в базе.');
+        _showError('QR-код недействителен или профиль ребёнка не найден.');
         return;
       }
 
       final childData = Map<dynamic, dynamic>.from(snapshot.value as Map);
       final childName = childData['name']?.toString() ?? 'Ребёнок';
 
-      // Обновляем статус привязки в базе данных
       await childRef.update({
         'isLinked': true,
         'linkedAt': ServerValue.timestamp,
       });
 
-      // Сохраняем сессию и имя ребёнка локально
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_type', 'child');
       await prefs.setString('saved_child_id', trimmedId);
       await prefs.setString('saved_child_name', childName);
 
-      // Запрашиваем нативные разрешения с защитой от зависания на эмуляторе
-      try {
-        await _requestPermissions().timeout(
-          const Duration(seconds: 3),
-          onTimeout: () {},
-        );
-      } catch (_) {}
+      await _requestPermissions();
 
       if (!mounted) return;
 
-      // Очищаем стек навигации, чтобы кнопкой «Назад» нельзя было выйти из панели ребёнка
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
-          builder: (context) => ChildPanelScreen(childName: childName),
+          builder: (context) => ChildPermissionsScreen(childName: childName),
         ),
         (route) => false,
       );
@@ -102,37 +96,6 @@ class _ChildQrScannerScreenState extends State<ChildQrScannerScreen> {
     }
   }
 
-  void _saveManualEntry() {
-    _codeController.clear();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Ввод кода вручную'),
-        content: TextField(
-          controller: _codeController,
-          decoration: const InputDecoration(
-            labelText: 'Введите код привязки',
-            hintText: 'Например: -Oabc123xyz...',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _processChildId(_codeController.text);
-            },
-            child: const Text('Подтвердить'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -147,15 +110,15 @@ class _ChildQrScannerScreenState extends State<ChildQrScannerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Сканирование QR-кода'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.keyboard),
-            tooltip: 'Ввести код текстом',
-            onPressed: _saveManualEntry,
-          ),
-        ],
+        backgroundColor: Colors.black45,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text(
+          'Сканирование QR-кода',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
       ),
       body: Stack(
         children: [
@@ -176,40 +139,25 @@ class _ChildQrScannerScreenState extends State<ChildQrScannerScreen> {
               height: 250,
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.blueAccent, width: 3),
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
               ),
             ),
           ),
           Positioned(
-            bottom: 40,
+            bottom: 48,
             left: 24,
             right: 24,
-            child: Column(
-              children: [
-                const Text(
-                  'Наведите камеру на QR-код с телефона родителя',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    backgroundColor: Colors.black45,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(50),
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _saveManualEntry,
-                  icon: const Icon(Icons.keyboard),
-                  label: const Text(
-                    'ВВЕСТИ КОД ТЕКСТОМ',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Text(
+                'Наведите камеру на QR-код с телефона родителя',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 15),
+              ),
             ),
           ),
         ],

@@ -17,6 +17,7 @@ class _InitialSessionWrapperState extends State<InitialSessionWrapper> {
   String? _userType;
   String? _userUid;
   String? _childId;
+  String _childName = 'Ребёнок';
 
   @override
   void initState() {
@@ -28,13 +29,16 @@ class _InitialSessionWrapperState extends State<InitialSessionWrapper> {
     final prefs = await SharedPreferences.getInstance();
     final userType = prefs.getString('user_type');
     final userUid = prefs.getString('user_uid');
-    final childId = prefs.getString('child_id');
+    // Поддерживаем актуальный ключ 'saved_child_id' и резервный 'child_id'
+    final childId = prefs.getString('saved_child_id') ?? prefs.getString('child_id');
+    final childName = prefs.getString('saved_child_name') ?? 'Ребёнок';
 
     if (!mounted) return;
     setState(() {
       _userType = userType;
       _userUid = userUid;
       _childId = childId;
+      _childName = childName;
       _isLoading = false;
     });
   }
@@ -55,7 +59,7 @@ class _InitialSessionWrapperState extends State<InitialSessionWrapper> {
 
     // Если устройство настроено как Ребёнок
     if (_userType == 'child' && _childId != null && _childId!.isNotEmpty) {
-      return const ChildPanelScreen();
+      return ChildPanelScreen(childName: _childName);
     }
 
     // Если сессии нет — показываем главное меню с кнопкой "МОЯ СЕМЬЯ"

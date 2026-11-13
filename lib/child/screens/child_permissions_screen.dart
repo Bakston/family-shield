@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'child_panel_screen.dart';
 
+import '../../core/app_theme.dart';
+
 class ChildPermissionsScreen extends StatefulWidget {
   final String childName;
 
@@ -15,17 +17,26 @@ class ChildPermissionsScreen extends StatefulWidget {
   State<ChildPermissionsScreen> createState() => _ChildPermissionsScreenState();
 }
 
-class _ChildPermissionsScreenState extends State<ChildPermissionsScreen> with WidgetsBindingObserver {
-  bool _locationGranted = false;
+class _ChildPermissionsScreenState extends State<ChildPermissionsScreen>
+    with WidgetsBindingObserver {
+  bool _locationAlwaysGranted = false;
   bool _usageStatsGranted = false;
+  bool _overlayGranted = false;
+  bool _batteryGranted = false;
+  bool _deviceAdminGranted = false;
+  bool _accessibilityGranted = false;
+  bool _defaultLauncherGranted = false;
 
-  static const platform = MethodChannel('com.example.family_shield/usage_stats');
+  static const _usageChannel =
+      MethodChannel('com.example.family_shield/usage_stats');
+  static const _adminChannel =
+      MethodChannel('com.example.family_shield/device_admin');
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _checkPermissions();
+    _checkAllPermissions();
   }
 
   @override
@@ -34,166 +45,289 @@ class _ChildPermissionsScreenState extends State<ChildPermissionsScreen> with Wi
     super.dispose();
   }
 
-  // Перепроверяем права, когда пользователь возвращается из системных настроек
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _checkPermissions();
+      _checkAllPermissions();
     }
   }
 
-  Future<void> _checkPermissions() async {
-    final locStatus = await Permission.location.status;
-    
-    bool usageGranted = false;
-    try {
-      final bool? result = await platform.invokeMethod('checkUsagePermission');
-      usageGranted = result ?? false;
-    } catch (e) {
-      debugPrint('Ошибка проверки UsageStats: $e');
-    }
+  Future<void> _checkAllPermissions() async {
+    final locAlways = await Permission.locationAlways.isGranted;
+    final overlay = await Permission.systemAlertWindow.isGranted;
+    final battery = await Permission.ignoreBatteryOptimizations.isGranted;
 
+    bool usage = false;
+    bool admin = false;
+    bool access = false;
+    bool launcher = false;
+
+    try {
+      usage =
+          await _usageChannel.invokeMethod<bool>('checkUsagePermission') ?? false;
+    } catch (_) {}
+
+    try {
+      admin =
+          await _adminChannel.invokeMethod<bool>('checkDeviceAdmin') ?? false;
+    } catch (_) {}
+
+    try {
+      access =
+          await _adminChannel.invokeMethod<bool>('checkAccessibility') ?? false;
+    } catch (_) {}
+
+    try {
+      launcher =
+          await _adminChannel.invokeMethod<bool>('checkDefaultLauncher') ??
+              false;
+    } catch (_) {}
+
+    if (!mounted) return;
     setState(() {
-      _locationGranted = locStatus.isGranted;
-      _usageStatsGranted = usageGranted;
+      _locationAlwaysGranted = locAlways;
+      _usageStatsGranted = usage;
+      _overlayGranted = overlay;
+      _batteryGranted = battery;
+      _deviceAdminGranted = admin;
+      _accessibilityGranted = access;
+      _defaultLauncherGranted = launcher;
     });
   }
 
-  Future<void> _requestLocationPermission() async {
+  Future<void> _requestLocation() async {
     final status = await Permission.location.request();
     if (status.isGranted) {
       await Permission.locationAlways.request();
     } else if (status.isPermanentlyDenied) {
-      openAppSettings();
+      await openAppSettings();
     }
-    _checkPermissions();
+    await Permission.notification.request();
+    _checkAllPermissions();
   }
 
-  Future<void> _requestUsagePermission() async {
+  Future<void> _requestBattery() async {
+    await Permission.ignoreBatteryOptimizations.request();
+    _checkAllPermissions();
+  }
+
+  Future<void> _requestDeviceAdmin() async {
     try {
-      await platform.invokeMethod('requestUsagePermission');
-    } catch (e) {
-      openAppSettings();
+      await _adminChannel.invokeMethod('requestDeviceAdmin');
+    } catch (_) {
+      await openAppSettings();
     }
   }
+
+  Future<void> _requestAccessibility() async {
+    try {
+      await _adminChannel.invokeMethod('requestAccessibility');
+    } catch (_) {
+      await openAppSettings();
+    }
+  }
+
+  Future<void> _requestDefaultLauncher() async {
+    try {
+      await _adminChannel.invokeMethod('requestDefaultLauncher');
+    } catch (_) {
+      await openAppSettings();
+    }
+  }
+
+  bool get _allRequiredGranted =>
+      _locationAlwaysGranted &&
+      _usageStatsGranted &&
+      _overlayGranted &&
+      _batteryGranted &&
+      _deviceAdminGranted &&
+      _accessibilityGranted &&
+      _defaultLauncherGranted;
 
   void _proceedToPanel() {
-    if (!_locationGranted || !_usageStatsGranted) {
+    if (!_allRequiredGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Пожалуйста, предоставьте все необходимые разрешения для продолжения'),
+          content: Text('Активируйте все 7 пунктов защиты перед продолжением'),
           backgroundColor: Colors.red,
         ),
       );
       return;
     }
 
-    Navigator.pushReplacement(
+    Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(
         builder: (context) => ChildPanelScreen(childName: widget.childName),
       ),
+      (route) => false,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Настройка защиты устройства'),
-        automaticallyImplyLeading: false,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Для работы родительского контроля на этом устройстве необходимо предоставить системные разрешения.',
-              style: TextStyle(fontSize: 15, color: Colors.grey),
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Image.asset(
+            AppTheme.parentBackgroundAsset,
+            fit: BoxFit.cover,
+          ),
+        ),
+        Positioned.fill(
+          child: Container(color: Colors.black.withValues(alpha: 0.45)),
+        ),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            automaticallyImplyLeading: false,
+            title: const Text(
+              'Настройка защиты',
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 24),
-            
-            // Карточка 1: Геолокация
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ListTile(
-                leading: Icon(
-                  _locationGranted ? Icons.check_circle : Icons.location_on,
-                  color: _locationGranted ? Colors.green : Colors.orange,
-                  size: 32,
-                ),
-                title: const Text('Геолокация (Всегда)', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('Необходимо для отслеживания местоположения ребёнка в реальном времени.'),
-                trailing: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _locationGranted ? Colors.green[50] : Colors.blue,
-                    foregroundColor: _locationGranted ? Colors.green : Colors.white,
+          ),
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Для защиты от удаления и запуска детского рабочего стола активируйте все права:',
+                    style: TextStyle(fontSize: 14, color: Colors.white70),
                   ),
-                  onPressed: _requestLocationPermission,
-                  child: Text(_locationGranted ? 'Готово' : 'Включить'),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Карточка 2: Статистика использования
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ListTile(
-                leading: Icon(
-                  _usageStatsGranted ? Icons.check_circle : Icons.bar_chart,
-                  color: _usageStatsGranted ? Colors.green : Colors.indigo,
-                  size: 32,
-                ),
-                title: const Text('Статистика использования', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('Нужно для анализа экранного времени и заблокированных приложений.'),
-                trailing: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _usageStatsGranted ? Colors.green[50] : Colors.blue,
-                    foregroundColor: _usageStatsGranted ? Colors.green : Colors.white,
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        _buildPermCard(
+                          granted: _locationAlwaysGranted,
+                          icon: Icons.location_on,
+                          color: Colors.orange,
+                          title: 'Геолокация (Всегда)',
+                          subtitle: 'Фоновое отслеживание координат',
+                          onTap: _requestLocation,
+                        ),
+                        _buildPermCard(
+                          granted: _batteryGranted,
+                          icon: Icons.battery_saver,
+                          color: Colors.teal,
+                          title: 'Работа без ограничений',
+                          subtitle: 'Исключить из оптимизации батареи',
+                          onTap: _requestBattery,
+                        ),
+                        _buildPermCard(
+                          granted: _usageStatsGranted,
+                          icon: Icons.bar_chart,
+                          color: Colors.indigo,
+                          title: 'Статистика использования',
+                          subtitle: 'Контроль экранного времени',
+                          onTap: () => _usageChannel
+                              .invokeMethod('requestUsagePermission'),
+                        ),
+                        _buildPermCard(
+                          granted: _overlayGranted,
+                          icon: Icons.layers,
+                          color: Colors.purple,
+                          title: 'Поверх других окон',
+                          subtitle: 'Экран блокировки при лимитах',
+                          onTap: () async {
+                            await Permission.systemAlertWindow.request();
+                            _checkAllPermissions();
+                          },
+                        ),
+                        _buildPermCard(
+                          granted: _deviceAdminGranted,
+                          icon: Icons.admin_panel_settings,
+                          color: Colors.redAccent,
+                          title: 'Администратор устройства',
+                          subtitle: 'Запрет на удаление приложения',
+                          onTap: _requestDeviceAdmin,
+                        ),
+                        _buildPermCard(
+                          granted: _accessibilityGranted,
+                          icon: Icons.accessibility_new,
+                          color: Colors.blue,
+                          title: 'Служба доступности',
+                          subtitle: 'Защита настроек от отключения',
+                          onTap: _requestAccessibility,
+                        ),
+                        _buildPermCard(
+                          granted: _defaultLauncherGranted,
+                          icon: Icons.home_filled,
+                          color: Colors.deepPurple,
+                          title: 'Лаунчер по умолчанию',
+                          subtitle: 'Защищённый рабочий стол ребёнка',
+                          onTap: _requestDefaultLauncher,
+                        ),
+                      ],
+                    ),
                   ),
-                  onPressed: _requestUsagePermission,
-                  child: Text(_usageStatsGranted ? 'Готово' : 'Настроить'),
-                ),
+                  const SizedBox(height: 12),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(56),
+                      backgroundColor: _allRequiredGranted
+                          ? Colors.green.shade600
+                          : Colors.blue.shade700.withValues(alpha: 0.9),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    onPressed: _proceedToPanel,
+                    child: const Text(
+                      'ЗАПУСТИТЬ РАБОЧИЙ СТОЛ',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
+          ),
+        ),
+      ],
+    );
+  }
 
-            // Карточка 3: Наложение поверх других окон
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ListTile(
-                leading: const Icon(Icons.layers, color: Colors.purple, size: 32),
-                title: const Text('Поверх других окон', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('Требуется для блокировки экрана при ограничениях.'),
-                trailing: ElevatedButton(
-                  onPressed: () {
-                    openAppSettings();
-                  },
-                  child: const Text('Настроить'),
-                ),
-              ),
+  Widget _buildPermCard({
+    required bool granted,
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      color: Colors.white.withValues(alpha: 0.92),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: ListTile(
+        leading: Icon(
+          granted ? Icons.check_circle : icon,
+          color: granted ? Colors.green : color,
+          size: 30,
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+        subtitle: Text(subtitle, style: const TextStyle(fontSize: 12)),
+        trailing: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor:
+                granted ? Colors.green.shade50 : Colors.blue.shade700,
+            foregroundColor: granted ? Colors.green.shade700 : Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
-
-            const Spacer(),
-
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(55),
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: _proceedToPanel,
-              child: const Text(
-                'ПРОДОЛЖИТЬ',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
+          ),
+          onPressed: onTap,
+          child: Text(granted ? 'Готово' : 'Включить'),
         ),
       ),
     );

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+
+import '../../core/app_theme.dart';
+
 const Color parentGlassPanel = Color(0x33FFFFFF);
 const Color parentTextPrimary = Colors.white;
 
@@ -27,7 +30,7 @@ class _ChildQrDisplayScreenState extends State<ChildQrDisplayScreen> {
         // 1. Фирменный фоновый рисунок
         Positioned.fill(
           child: Image.asset(
-            'assets/images/background_0002_001.jpg',
+            AppTheme.parentBackgroundAsset,
             fit: BoxFit.cover,
           ),
         ),

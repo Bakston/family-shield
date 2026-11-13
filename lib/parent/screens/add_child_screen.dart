@@ -3,6 +3,8 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'child_qr_display_screen.dart';
 
+import '../../core/app_theme.dart';
+
 // Глобальные дизайн-константы
 const Color parentGlassPanel = Color(0x33FFFFFF);
 const Color parentTextPrimary = Colors.white;
@@ -113,7 +115,7 @@ class _AddChildScreenState extends State<AddChildScreen> {
         // 1. Фирменный фоновый рисунок
         Positioned.fill(
           child: Image.asset(
-            'assets/images/background_0002_001.jpg',
+            AppTheme.parentBackgroundAsset,
             fit: BoxFit.cover,
           ),
         ),
